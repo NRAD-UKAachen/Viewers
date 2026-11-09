@@ -4,6 +4,7 @@ import verdant from './verdant.json';
 import midnight from './midnight.json';
 import slate from './slate.json';
 import deep from './deep.json';
+import aachen from './aachen.json';
 
 export interface ThemePreset {
   name: string;
@@ -13,4 +14,4 @@ export interface ThemePreset {
   };
 }
 
-export const themePresets: ThemePreset[] = [orchid, arctic, verdant, midnight, slate, deep];
+export const themePresets: ThemePreset[] = [orchid, arctic, verdant, midnight, slate, deep, aachen];

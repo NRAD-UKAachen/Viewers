@@ -1,5 +1,5 @@
 # Stage 1: Build the application
-FROM node:20.18.1-slim as builder
+FROM node:24.15.0-slim as builder
 
 # Setup the working directory
 RUN mkdir /usr/src/app
@@ -7,24 +7,27 @@ WORKDIR /usr/src/app
 
 # Install dependencies
 # apt-get update is combined with apt-get install to avoid using outdated packages
-RUN apt-get update && apt-get install -y build-essential python3
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g pnpm@11
 
 # Copy package.json and other dependency-related files first
-# Assuming your package.json and yarn.lock or similar are located in the project root
+# Assuming your package.json and pnpm-lock.yaml or similar are located in the project root
 
 COPY ./ /usr/src/app/
 
 # Install node dependencies
-RUN yarn config set workspaces-experimental true
-RUN yarn install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Copy the rest of the application code
 
 # set QUICK_BUILD to true to make the build faster for dev
+ENV QUICK_BUILD=true
 ENV APP_CONFIG=config/docker-nginx-dcm4chee.js
 
 # Build the application
-RUN yarn run build
+RUN pnpm run build
 
 # # Stage 2: Bundle the built application into a Docker container which runs NGINX using Alpine Linux
 FROM nginx:alpine
@@ -35,6 +38,16 @@ RUN mkdir -p /var/log/nginx /var/www/html
 
 # # Copy build output to serve static files
 COPY --from=builder /usr/src/app/platform/app/dist /var/www/html
+
+# app-config.js is baked in by `pnpm run build` above, so the portal's port
+# cannot be interpolated into it by compose. nginx:alpine runs everything in
+# /docker-entrypoint.d/ before starting, which is where we patch it in from
+# PORT_PORTAL. See the script, and INTERACT_PORTAL_PORT in the config.
+# Path is relative to the build context, which is the repo root (see the
+# ohif_viewer service's build.context), not this directory.
+COPY platform/app/.recipes/Nginx-Dcm4chee/config/40-interact-ports.sh \
+     /docker-entrypoint.d/40-interact-ports.sh
+RUN chmod +x /docker-entrypoint.d/40-interact-ports.sh
 
 # # Expose HTTP and HTTPS ports
 EXPOSE 80 443

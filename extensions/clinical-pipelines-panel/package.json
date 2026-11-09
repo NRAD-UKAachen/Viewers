@@ -1,0 +1,19 @@
+{
+  "name": "@ohif/extension-clinical-pipelines-panel",
+  "version": "1.0.0",
+  "description": "Side panel that embeds the Clinical Pipelines / SPM-FSL Statistics Flask pages, scoped to the active study",
+  "author": "Local",
+  "license": "MIT",
+  "main": "dist/ohif-extension-clinical-pipelines-panel.umd.js",
+  "module": "src/index.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "peerDependencies": {
+    "@ohif/core": "workspace:*",
+    "react": "18.3.1"
+  },
+  "keywords": [
+    "ohif-extension"
+  ]
+}

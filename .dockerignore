@@ -35,3 +35,10 @@ dockerfile
 coverage/
 platform/docs/
 testdata/
+
+# Runtime data volumes bind-mounted for the dcm4chee-arc recipe services
+# (Postgres/LDAP/wildfly/dcm4chee storage) -- these live inside the build
+# context by coincidence of directory layout, aren't needed to build the
+# OHIF static app, and some (e.g. the Postgres data dir) aren't even
+# readable by every user who might run the build.
+platform/app/.recipes/**/dcm4chee-arc/

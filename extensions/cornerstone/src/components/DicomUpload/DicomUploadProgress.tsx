@@ -3,17 +3,12 @@ import PropTypes from 'prop-types';
 import { useSystem } from '@ohif/core';
 import { Button } from '@ohif/ui-next';
 import { Icons } from '@ohif/ui-next';
-import DicomFileUploader, {
-  EVENTS,
-  UploadStatus,
-  DicomFileUploaderProgressEvent,
-  UploadRejection,
-} from '../../utils/DicomFileUploader';
+import { EVENTS, FileUploaderProgressEvent, IFileUploader, UploadRejection, UploadStatus } from '../../utils/FileUploader';
 import DicomUploadProgressItem from './DicomUploadProgressItem';
 import classNames from 'classnames';
 
 type DicomUploadProgressProps = {
-  dicomFileUploaderArr: DicomFileUploader[];
+  fileUploaderArr: IFileUploader[];
   onComplete: () => void;
 };
 
@@ -38,7 +33,7 @@ const UPLOAD_RATE_THRESHOLD = 75;
 const NO_WRAP_ELLIPSIS_CLASS_NAMES = 'text-ellipsis whitespace-nowrap overflow-hidden';
 
 function DicomUploadProgress({
-  dicomFileUploaderArr,
+  fileUploaderArr,
   onComplete,
 }: DicomUploadProgressProps): ReactElement {
   const { servicesManager } = useSystem();
@@ -47,7 +42,7 @@ function DicomUploadProgress({
     servicesManager.services.customizationService.getCustomization('ui.progressLoadingBar');
 
   const [totalUploadSize] = useState(
-    dicomFileUploaderArr.reduce((acc, fileUploader) => acc + fileUploader.getFileSize(), 0)
+    fileUploaderArr.reduce((acc, fileUploader) => acc + fileUploader.getFileSize(), 0)
   );
 
   const currentUploadSizeRef = useRef<number>(0);
@@ -123,7 +118,7 @@ function DicomUploadProgress({
     // For each uploader, listen for the progress percentage complete and
     // add promise catch/finally callbacks to detect errors and count number
     // of uploads complete.
-    const subscriptions = dicomFileUploaderArr.map(fileUploader => {
+    const subscriptions = fileUploaderArr.map(fileUploader => {
       let currentFileUploadSize = 0;
 
       const updateProgress = (percentComplete: number) => {
@@ -181,7 +176,7 @@ function DicomUploadProgress({
         }
       };
 
-      const progressCallback = (progressEvent: DicomFileUploaderProgressEvent) => {
+      const progressCallback = (progressEvent: FileUploaderProgressEvent) => {
         updateProgress(progressEvent.percentComplete);
       };
 
@@ -209,13 +204,13 @@ function DicomUploadProgress({
   }, []);
 
   const cancelAllUploads = useCallback(async () => {
-    for (const dicomFileUploader of dicomFileUploaderArr) {
+    for (const fileUploader of fileUploaderArr) {
       // Important: we need a non-blocking way to cancel every upload,
       // otherwise the UI will freeze and the user will not be able
       // to interact with the app and progress will not be updated.
       const promise = new Promise<void>((resolve, reject) => {
         setTimeout(() => {
-          dicomFileUploader.cancel();
+          fileUploader.cancel();
           resolve();
         }, 0);
       });
@@ -266,7 +261,7 @@ function DicomUploadProgress({
   const getNofMFilesStyle = useCallback(() => {
     // the number of digits accounts for the digits being on each side of the ' of '
     const numDigits =
-      numFilesCompleted.toString().length + dicomFileUploaderArr.length.toString().length;
+      numFilesCompleted.toString().length + fileUploaderArr.length.toString().length;
     // The number of digits + 3 additional characters (accounts for ' of ').
     // Even though intuitively 4 should be better, this is the most accurate width.
     // The font may play a part in this discrepancy.
@@ -277,10 +272,10 @@ function DicomUploadProgress({
   const getNumCompletedAndTimeRemainingComponent = (): ReactElement => {
     return (
       <div className="bg-muted text-foreground flex h-14 items-center px-1 pb-4 text-lg">
-        {numFilesCompleted === dicomFileUploaderArr.length ? (
+        {numFilesCompleted === fileUploaderArr.length ? (
           <>
-            <span className={NO_WRAP_ELLIPSIS_CLASS_NAMES}>{`${dicomFileUploaderArr.length} ${
-              dicomFileUploaderArr.length > 1 ? 'files' : 'file'
+            <span className={NO_WRAP_ELLIPSIS_CLASS_NAMES}>{`${fileUploaderArr.length} ${
+              fileUploaderArr.length > 1 ? 'files' : 'file'
             } completed.`}</span>
             <Button
               disabled={false}
@@ -297,7 +292,7 @@ function DicomUploadProgress({
                 style={getNofMFilesStyle()}
                 className={classNames(NO_WRAP_ELLIPSIS_CLASS_NAMES, 'text-right')}
               >
-                {`${numFilesCompleted} of ${dicomFileUploaderArr.length}`}&nbsp;
+                {`${numFilesCompleted} of ${fileUploaderArr.length}`}&nbsp;
               </span>
               <span className={NO_WRAP_ELLIPSIS_CLASS_NAMES}>{' files completed.'}</span>
               <br />
@@ -339,7 +334,7 @@ function DicomUploadProgress({
     return (
       <div className="ohif-scrollbar border-input overflow-y-scroll border-b px-2">
         <div className="min-h-14 flex w-full items-center p-2.5">
-          {numFilesCompleted === dicomFileUploaderArr.length ? (
+          {numFilesCompleted === fileUploaderArr.length ? (
             <>
               <div className="text-highlight text-xl">
                 {numFails > 0
@@ -375,15 +370,15 @@ function DicomUploadProgress({
       <div className="flex grow flex-col overflow-hidden bg-background text-lg">
         {getPercentCompleteComponent()}
         <div className="ohif-scrollbar h-1 grow overflow-y-scroll px-2">
-          {dicomFileUploaderArr
+          {fileUploaderArr
             .filter(
-              dicomFileUploader =>
-                !showFailedOnly || dicomFileUploader.getStatus() === UploadStatus.Failed
+              fileUploader =>
+                !showFailedOnly || fileUploader.getStatus() === UploadStatus.Failed
             )
-            .map(dicomFileUploader => (
+            .map(fileUploader => (
               <DicomUploadProgressItem
-                key={dicomFileUploader.getFileId()}
-                dicomFileUploader={dicomFileUploader}
+                key={fileUploader.getFileId()}
+                fileUploader={fileUploader}
               />
             ))}
         </div>
@@ -393,7 +388,7 @@ function DicomUploadProgress({
 }
 
 DicomUploadProgress.propTypes = {
-  dicomFileUploaderArr: PropTypes.arrayOf(PropTypes.instanceOf(DicomFileUploader)).isRequired,
+  fileUploaderArr: PropTypes.arrayOf(PropTypes.object).isRequired,
   onComplete: PropTypes.func.isRequired,
 };
 

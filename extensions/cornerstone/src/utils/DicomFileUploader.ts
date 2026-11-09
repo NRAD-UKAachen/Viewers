@@ -1,40 +1,12 @@
 import dicomImageLoader from '@cornerstonejs/dicom-image-loader';
 
 import { PubSubService } from '@ohif/core';
+import { EVENTS, FileUploaderProgressEvent, IFileUploader, UploadRejection, UploadStatus } from './FileUploader';
 
-export const EVENTS = {
-  PROGRESS: 'event:DicomFileUploader:progress',
-};
+export { EVENTS, UploadRejection, UploadStatus };
+export type DicomFileUploaderProgressEvent = FileUploaderProgressEvent;
 
-export interface DicomFileUploaderEvent {
-  fileId: number;
-}
-
-export interface DicomFileUploaderProgressEvent extends DicomFileUploaderEvent {
-  percentComplete: number;
-}
-
-export enum UploadStatus {
-  NotStarted,
-  InProgress,
-  Success,
-  Failed,
-  Cancelled,
-}
-
-type CancelOrFailed = UploadStatus.Cancelled | UploadStatus.Failed;
-
-export class UploadRejection {
-  message: string;
-  status: CancelOrFailed;
-
-  constructor(status: CancelOrFailed, message: string) {
-    this.message = message;
-    this.status = status;
-  }
-}
-
-export default class DicomFileUploader extends PubSubService {
+export default class DicomFileUploader extends PubSubService implements IFileUploader {
   private _file;
   private _fileId;
   private _dataSource;

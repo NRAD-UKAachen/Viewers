@@ -1,23 +1,25 @@
 import React, { ReactElement, memo, useCallback, useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import DicomFileUploader, {
-  DicomFileUploaderProgressEvent,
+import {
   EVENTS,
+  FileUploaderProgressEvent,
+  IFileUploader,
   UploadRejection,
   UploadStatus,
-} from '../../utils/DicomFileUploader';
+} from '../../utils/FileUploader';
 import { Icons } from '@ohif/ui-next';
 
 type DicomUploadProgressItemProps = {
-  dicomFileUploader: DicomFileUploader;
+  fileUploader: IFileUploader;
 };
 
 // eslint-disable-next-line react/display-name
 const DicomUploadProgressItem = memo(
-  ({ dicomFileUploader }: DicomUploadProgressItemProps): ReactElement => {
-    const [percentComplete, setPercentComplete] = useState(dicomFileUploader.getPercentComplete());
+  ({ fileUploader }: DicomUploadProgressItemProps): ReactElement => {
+    const [percentComplete, setPercentComplete] = useState(fileUploader.getPercentComplete());
     const [failedReason, setFailedReason] = useState('');
-    const [status, setStatus] = useState(dicomFileUploader.getStatus());
+    const [status, setStatus] = useState(fileUploader.getStatus());
+    const [statusLabel, setStatusLabel] = useState(fileUploader.getStatusLabel?.() ?? '');
 
     const isComplete = useCallback(() => {
       return (
@@ -28,30 +30,34 @@ const DicomUploadProgressItem = memo(
     }, [status]);
 
     useEffect(() => {
-      const progressSubscription = dicomFileUploader.subscribe(
+      const progressSubscription = fileUploader.subscribe(
         EVENTS.PROGRESS,
-        (dicomFileUploaderProgressEvent: DicomFileUploaderProgressEvent) => {
-          setPercentComplete(dicomFileUploaderProgressEvent.percentComplete);
+        (progressEvent: FileUploaderProgressEvent) => {
+          setPercentComplete(progressEvent.percentComplete);
+          setStatusLabel(fileUploader.getStatusLabel?.() ?? '');
         }
       );
 
-      dicomFileUploader
+      fileUploader
         .load()
         .catch((reason: UploadRejection) => {
           setStatus(reason.status);
           setFailedReason(reason.message ?? '');
         })
-        .finally(() => setStatus(dicomFileUploader.getStatus()));
+        .finally(() => {
+          setStatus(fileUploader.getStatus());
+          setStatusLabel(fileUploader.getStatusLabel?.() ?? '');
+        });
 
       return () => progressSubscription.unsubscribe();
     }, []);
 
     const cancelUpload = useCallback(() => {
-      dicomFileUploader.cancel();
+      fileUploader.cancel();
     }, []);
 
     const getStatusIcon = (): ReactElement => {
-      switch (dicomFileUploader.getStatus()) {
+      switch (fileUploader.getStatus()) {
         case UploadStatus.Success:
           return (
             <Icons.ByName
@@ -76,15 +82,20 @@ const DicomUploadProgressItem = memo(
           <div className="flex gap-4">
             <div className="flex w-6 shrink-0 items-center justify-center">{getStatusIcon()}</div>
             <div className="text-foreground overflow-hidden text-ellipsis whitespace-nowrap">
-              {dicomFileUploader.getFileName()}
+              {fileUploader.getFileName()}
             </div>
+            {statusLabel && (
+              <div className="text-muted-foreground shrink-0 whitespace-nowrap text-sm">
+                {statusLabel}
+              </div>
+            )}
           </div>
           {failedReason && <div className="pl-10">{failedReason}</div>}
         </div>
         <div className="flex w-24 items-center">
           {!isComplete() && (
             <>
-              {dicomFileUploader.getStatus() === UploadStatus.InProgress && (
+              {fileUploader.getStatus() === UploadStatus.InProgress && (
                 <div className="w-10 text-right">{percentComplete}%</div>
               )}
               <div className="ml-auto flex cursor-pointer">
@@ -102,7 +113,7 @@ const DicomUploadProgressItem = memo(
 );
 
 DicomUploadProgressItem.propTypes = {
-  dicomFileUploader: PropTypes.instanceOf(DicomFileUploader).isRequired,
+  fileUploader: PropTypes.object.isRequired,
 };
 
 export default DicomUploadProgressItem;

@@ -1,0 +1,28 @@
+{
+  "name": "aachen",
+  "label": "Custom: Aachen",
+  "cssVars": {
+    "dark": {
+      "background": "0 0% 5%",
+      "foreground": "0 0% 100%",
+      "card": "80 100% 30%",
+      "card-foreground": "0 0% 100%",
+      "popover": "0 0% 60%",
+      "popover-foreground": "0 0% 100%",
+      "primary": "0 0% 100%",
+      "primary-foreground": "210 63% 73%",
+      "secondary": "80 100% 30%",
+      "secondary-foreground": "0 0% 5%",
+      "muted": "0 0% 20%",
+      "muted-foreground": "0 0% 100%",
+      "accent": "210 63% 73%",
+      "accent-foreground": "0 0% 100%",
+      "border": "90 100% 40%",
+      "input": "80 100% 30%",
+      "ring": "208 100% 31%",
+      "highlight": "80 100% 30%",
+      "destructive": "345 100% 40%",
+      "destructive-foreground": "0 0% 100%"
+    }
+  }
+}

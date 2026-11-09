@@ -239,6 +239,12 @@ declare global {
       activateViewportBeforeInteraction?: boolean;
       autoPlayCine?: boolean;
       showStudyList?: boolean;
+      /**
+       * Theme every visitor starts on when they have not picked one themselves:
+       * 'default' (stock OHIF) or a preset name from ui-next's themePresets.
+       * A choice made in the Appearance modal is stored per browser and wins.
+       */
+      defaultTheme?: string;
       whiteLabeling?: Record<string, unknown>;
       httpErrorHandler?: (error: Error) => void;
       dangerouslyUseDynamicConfig?: {

@@ -1,0 +1,27 @@
+diff --git a/dist/esm/ONNXSegmentationController.js b/dist/esm/ONNXSegmentationController.js
+index 75e800e6e40e37c75c0e0c1724177c7a82654714..f575727efc5143967034b4ce7cd4bfc871ff64b2 100644
+--- a/dist/esm/ONNXSegmentationController.js
++++ b/dist/esm/ONNXSegmentationController.js
+@@ -1,4 +1,4 @@
+-import { utilities, eventTarget, Enums, triggerEvent, cache, } from '@cornerstonejs/core';
++import { utilities, eventTarget, Enums, triggerEvent, cache, getEnabledElement, } from '@cornerstonejs/core';
+ import * as cornerstoneTools from '@cornerstonejs/tools';
+ import { segmentation as cstSegmentation, LabelmapBaseTool, } from '@cornerstonejs/tools';
+ import { Events as aiEvents } from './enums/index.js';
+@@ -111,12 +111,15 @@ class ONNXSegmentationController {
+         };
+         this.pCutoff = 64;
+         this.getPromptAnnotations = (viewport = this.viewport) => {
++            if (!viewport || !getEnabledElement(viewport.element)) {
++                return [];
++            }
+             const annotations = [];
+             const { element } = viewport;
+             for (const annotationName of this.promptAnnotationTypes) {
+                 annotations.push(...annotationState.getAnnotations(annotationName, element));
+             }
+-            const currentAnnotations = filterAnnotationsForDisplay(this.viewport, annotations);
++            const currentAnnotations = filterAnnotationsForDisplay(viewport, annotations);
+             return currentAnnotations;
+         };
+         this.viewportRenderedListener = (_event) => {

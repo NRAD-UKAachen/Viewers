@@ -22,6 +22,22 @@ function isValidUrlTheme(theme: string | null): theme is string {
   return !!theme && theme !== 'custom' && VALID_THEMES.has(theme);
 }
 
+// Deployment-wide default, set as `defaultTheme` in the app config
+// (platform/app/public/config/*.js). It only decides what a visitor with no
+// stored choice of their own gets; anything picked in the Appearance modal is
+// written to localStorage and wins from then on. 'custom' is not allowed here
+// for the same reason it is not URL-addressable: the CSS behind it is per-visitor.
+function getConfiguredDefaultTheme(): string {
+  if (typeof window === 'undefined') {
+    return 'default';
+  }
+  const configured = (window as any).config?.defaultTheme;
+  if (typeof configured !== 'string' || configured === 'custom' || !VALID_THEMES.has(configured)) {
+    return 'default';
+  }
+  return configured;
+}
+
 const ActiveThemeContext = React.createContext<ActiveThemeContextType | undefined>(undefined);
 
 function removeThemeClasses() {
@@ -98,14 +114,17 @@ function injectCustomStyles(vars: string[]) {
 export function ActiveThemeProvider({ children }: { children: React.ReactNode }) {
   const [activeTheme, setActiveThemeState] = React.useState<string>(() => {
     if (typeof window === 'undefined') return 'default';
+    const configuredDefault = getConfiguredDefaultTheme();
     const urlTheme = new URLSearchParams(window.location.search).get('theme');
     if (isValidUrlTheme(urlTheme)) return urlTheme;
 
     // Validate the stored value the same way the URL param is validated — a stale
     // key (renamed preset, older build) must not become a theme-* body class.
     const stored = localStorage.getItem(STORAGE_KEY_THEME);
-    if (!stored || !VALID_THEMES.has(stored)) return 'default';
-    if (stored === 'custom' && !localStorage.getItem(STORAGE_KEY_CUSTOM_CSS)) return 'default';
+    if (!stored || !VALID_THEMES.has(stored)) return configuredDefault;
+    if (stored === 'custom' && !localStorage.getItem(STORAGE_KEY_CUSTOM_CSS)) {
+      return configuredDefault;
+    }
     return stored;
   });
 
@@ -128,11 +147,11 @@ export function ActiveThemeProvider({ children }: { children: React.ReactNode })
       removeCustomStyleElement();
     }
 
-    if (theme === 'default') {
-      localStorage.removeItem(STORAGE_KEY_THEME);
-    } else {
-      localStorage.setItem(STORAGE_KEY_THEME, theme);
-    }
+    // Stored even when it is 'default': with a deployment-wide defaultTheme
+    // configured, an absent key means "no choice made" and resolves to that
+    // theme, so removing the key would silently undo an explicit pick of the
+    // stock theme on the next load.
+    localStorage.setItem(STORAGE_KEY_THEME, theme);
   }, []);
 
   const applyCustomTheme = React.useCallback((cssText: string): boolean => {
@@ -156,8 +175,14 @@ export function ActiveThemeProvider({ children }: { children: React.ReactNode })
     setCustomCssState('');
     localStorage.removeItem(STORAGE_KEY_CUSTOM_CSS);
 
-    setActiveThemeState('default');
+    // Clearing drops the visitor back to the deployment's baseline, which is
+    // the configured defaultTheme when there is one, not necessarily stock OHIF.
+    const configuredDefault = getConfiguredDefaultTheme();
+    setActiveThemeState(configuredDefault);
     removeThemeClasses();
+    if (configuredDefault !== 'default') {
+      document.body.classList.add(`theme-${configuredDefault}`);
+    }
     localStorage.removeItem(STORAGE_KEY_THEME);
   }, []);
 
@@ -165,11 +190,7 @@ export function ActiveThemeProvider({ children }: { children: React.ReactNode })
   React.useEffect(() => {
     const urlTheme = new URLSearchParams(window.location.search).get('theme');
     if (isValidUrlTheme(urlTheme)) {
-      if (urlTheme === 'default') {
-        localStorage.removeItem(STORAGE_KEY_THEME);
-      } else {
-        localStorage.setItem(STORAGE_KEY_THEME, urlTheme);
-      }
+      localStorage.setItem(STORAGE_KEY_THEME, urlTheme);
     }
   }, []);
 

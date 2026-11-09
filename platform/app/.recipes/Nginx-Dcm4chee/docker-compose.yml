@@ -1,16 +1,256 @@
+# dcm4chee PACS + the OHIF viewer, both behind oauth2-proxy.
+#
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose up -d`), not from this directory. All values come from the
+# root .env; see .env.example.
+
+# Nothing in this stack talks to the internet -- it is all container-to-
+# container over interact-dcm4chee and interact-auth. The proxy variables are
+# blanked rather than left unset ON PURPOSE: a daemon-level proxy in
+# ~/.docker/config.json is injected into every container it creates, and
+# oauth2-proxy would then try to reach keycloak-dev THROUGH that proxy and fail
+# OIDC discovery. Empty values override the injection.
+x-proxy-env: &proxy-env
+  HTTP_PROXY: ""
+  HTTPS_PROXY: ""
+  http_proxy: ""
+  https_proxy: ""
+  NO_PROXY: "${INTERACT_NO_PROXY:-}"
+  no_proxy: "${INTERACT_NO_PROXY:-}"
+
 services:
+  # Server-side session store for both oauth2-proxy instances below.
+  #
+  # Without this, oauth2-proxy keeps the whole session (Keycloak access +
+  # refresh + ID token, including the "groups" claim pulled from the userinfo
+  # endpoint) client-side, splitting it across as many `_oauth2_proxy_N`
+  # cookies as it takes to fit. Cookies aren't port-scoped, and this host
+  # runs a second InterACT stack alongside this one on the same hostname
+  # (see interact-two-stack-layout in project memory) -- so a browser
+  # logged into both sends BOTH stacks' chunk-cookies, plus both stacks'
+  # Keycloak session cookies, on every request here. That combined Cookie
+  # header grew past what dcm4chee's proxy chain would accept and every
+  # request to OHIF/dcm4chee failed with a bare 400 (no application log
+  # line, because the rejection happens before either Go http.Server's
+  # handler runs). Redis makes the browser-held cookie one small opaque
+  # session ID regardless of token size or how many stacks share the host.
+  oauth2-redis:
+    image: redis:7-alpine
+    container_name: ${STACK_NAME:-interact}-oauth2-redis
+    command: ["redis-server", "--requirepass", "${OAUTH2_PROXY_REDIS_PASSWORD:?Set OAUTH2_PROXY_REDIS_PASSWORD in the root .env}", "--save", "", "--appendonly", "no"]
+    expose:
+      - "6379"
+    networks:
+      - interact-dcm4chee
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+
+  # OAuth2 Proxy - Authentication gateway for OHIF and dcm4chee
+  # This instance allows ALL authenticated users
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    container_name: ${STACK_NAME:-interact}-oauth2-proxy
+    command:
+      - --http-address=0.0.0.0:4180
+      - --upstream=http://ohif_viewer:80
+      - --provider=oidc
+      - --provider-display-name=Keycloak
+      - --client-id=ohif-viewer
+      - --client-secret=${OIDC_OHIF_CLIENT_SECRET:?Set OIDC_OHIF_CLIENT_SECRET in the root .env}
+      - --oidc-issuer-url=http://keycloak-dev:8080/realms/interact-realm
+      - --insecure-oidc-skip-issuer-verification=true
+      - --redirect-url=${OHIF_BASE_URL}/oauth2/callback
+      - --cookie-secret=${OAUTH2_PROXY_COOKIE_SECRET:?Set OAUTH2_PROXY_COOKIE_SECRET in the root .env}
+      - --cookie-secure=false
+      # Namespaced by STACK_NAME: cookies aren't port-scoped, so a bare
+      # "_oauth2_proxy" collides in the browser with any other InterACT
+      # stack on this host (e.g. a production and a test stack side by
+      # side), each signing with its own OAUTH2_PROXY_COOKIE_SECRET.
+      # Whichever stack authenticated last overwrites the other's cookie, the
+      # other then fails signature validation on every request and forces a
+      # re-login on the very first framed OHIF load -- before the SPA's own
+      # session-guard script (docker-nginx-dcm4chee.js) can break out of the
+      # portal iframe, so Keycloak's login page tries to render framed and
+      # gets blocked by its frame-ancestors CSP. Same reasoning as
+      # docker-context-gui/docker-compose.yml's SESSION_COOKIE_NAME.
+      - --cookie-name=_oauth2_proxy_${STACK_NAME:-interact}
+      - --email-domain=*
+      # Lets the session-guard script in docker-nginx-dcm4chee.js send a
+      # post-login `rd` back to the InterACT portal's own OHIF page
+      # (docker-context-gui, so the sidebar/chrome comes back too) instead of
+      # only ever landing on bare OHIF. Without this, oauth2-proxy silently
+      # drops any `rd` whose host isn't its own and falls back to "/".
+      - --whitelist-domain=${PUBLIC_HOST}:${PORT_PORTAL}
+      - --scope=openid email profile
+      - --skip-provider-button=true
+      - --pass-access-token=true
+      - --pass-authorization-header=true
+      - --set-xauthrequest=true
+      - --set-authorization-header=true
+      - --pass-user-headers=true
+      - --reverse-proxy=true
+      - --oidc-groups-claim=groups
+      - --prefer-email-to-user=false
+      # Server-side session store -- see oauth2-redis's comment above for why.
+      - --session-store-type=redis
+      - --redis-connection-url=redis://oauth2-redis:6379
+      - --redis-password=${OAUTH2_PROXY_REDIS_PASSWORD:?Set OAUTH2_PROXY_REDIS_PASSWORD in the root .env}
+      # Force userinfo call to get groups on every auth request
+      - --profile-url=http://keycloak-dev:8080/realms/interact-realm/protocol/openid-connect/userinfo
+      - --skip-claims-from-profile-url=false
+      # Who authenticated, and when. The PHI trail proper is nginx's
+      # phi-audit.log (config/nginx.conf); this is the sign-in half of it,
+      # and it is what lets a session in that trail be tied back to a login.
+      # Already the default; set explicitly so it survives someone tidying
+      # the flags below.
+      - --auth-logging=true
+      # OFF, and note this is NOT the default - oauth2-proxy logs requests
+      # unless told otherwise. Every line carried the full request URI into
+      # `docker logs`, which is unprotected (readable by anyone in the docker
+      # group) and unrotated beyond the 10m json-file cap, and those URIs
+      # carry study UIDs and QIDO patient search terms. nginx now records the
+      # same requests to phi-audit.log, on disk with restricted access, so
+      # this copy is a liability with nothing left to justify it.
+      - --request-logging=false
+    ports:
+      - "${PORT_OHIF:-1081}:4180"
+    depends_on:
+      - ohif_viewer
+      - oauth2-redis
+    environment:
+      <<: *proxy-env
+    extra_hosts:
+      - "${PUBLIC_HOST}:host-gateway"
+    networks:
+      - interact-dcm4chee
+      - interact-auth
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+
+  # OAuth2 Proxy for Admin-only DCM4CHEE access
+  # This instance ONLY allows users in the Admin group
+  # Access the DCM4CHEE UI at ${DCM4CHEE_ADMIN_BASE_URL}/dcm4chee-arc/ui2/
+  oauth2-proxy-admin:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    container_name: ${STACK_NAME:-interact}-oauth2-proxy-admin
+    command:
+      - --http-address=0.0.0.0:4181
+      # Routed through dcm4chee-ui-proxy instead of straight to arc:8080 so
+      # the Aachen color-scheme stylesheet (config/aachen-theme.css) gets
+      # injected into dcm4chee-arc-ui2's app shell. dcm4chee-ui-proxy passes
+      # everything else through to arc unchanged.
+      - --upstream=http://dcm4chee-ui-proxy:80
+      - --provider=oidc
+      - --provider-display-name=Keycloak
+      - --client-id=ohif-viewer
+      - --client-secret=${OIDC_OHIF_CLIENT_SECRET:?Set OIDC_OHIF_CLIENT_SECRET in the root .env}
+      - --oidc-issuer-url=http://keycloak-dev:8080/realms/interact-realm
+      - --insecure-oidc-skip-issuer-verification=true
+      - --redirect-url=${DCM4CHEE_ADMIN_BASE_URL}/oauth2/callback
+      - --cookie-secret=${OAUTH2_PROXY_COOKIE_SECRET:?Set OAUTH2_PROXY_COOKIE_SECRET in the root .env}
+      - --cookie-secure=false
+      # See the oauth2-proxy service's --cookie-name comment above.
+      - --cookie-name=_oauth2_proxy_admin_${STACK_NAME:-interact}
+      - --email-domain=*
+      - --scope=openid email profile
+      - --oidc-groups-claim=groups
+      # Server-side session store -- see oauth2-redis's comment above for why.
+      - --session-store-type=redis
+      - --redis-connection-url=redis://oauth2-redis:6379
+      - --redis-password=${OAUTH2_PROXY_REDIS_PASSWORD:?Set OAUTH2_PROXY_REDIS_PASSWORD in the root .env}
+      # RESTRICT ACCESS TO ADMIN GROUP ONLY
+      - --allowed-group=Admin
+      - --skip-provider-button=true
+      - --pass-access-token=true
+      - --pass-authorization-header=true
+      - --pass-user-headers=true
+      - --reverse-proxy=true
+      # Enable logging
+      - --auth-logging=true
+      - --request-logging=true
+    ports:
+      - "${PORT_DCM4CHEE_ADMIN:-1082}:4181"
+    depends_on:
+      - dcm4chee-ui-proxy
+      - oauth2-redis
+    environment:
+      <<: *proxy-env
+    extra_hosts:
+      - "${PUBLIC_HOST}:host-gateway"
+    networks:
+      - interact-dcm4chee
+      - interact-auth
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+
+  # Thin reverse proxy in front of arc:8080, used only by
+  # oauth2-proxy-admin. Injects the Aachen color-scheme stylesheet
+  # (aachen-theme.css) into dcm4chee-arc-ui2's app shell HTML via
+  # sub_filter; every other request passes straight through to arc.
+  # See config/dcm4chee-theme-proxy.conf.
+  dcm4chee-ui-proxy:
+    image: nginx:1.27-alpine
+    container_name: ${STACK_NAME:-interact}-dcm4chee_ui_proxy
+    volumes:
+      - ./config/dcm4chee-theme-proxy.conf:/etc/nginx/nginx.conf:ro
+      - ./config/aachen-theme.css:/etc/nginx/aachen-theme.css:ro
+    depends_on:
+      - arc
+    expose:
+      - "80"
+    networks:
+      - interact-dcm4chee
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+
+  # The dcm4chee credentials used to live in a tracked docker-compose.env with
+  # POSTGRES_PASSWORD=pacs. They come from the root .env now; the three
+  # services below must agree on them, so they are written out per service
+  # rather than shared through a file that is easy to forget about.
   ldap:
     image: dcm4che/slapd-dcm4chee:2.6.3-29.0
     logging:
       driver: json-file
       options:
         max-size: "10m"
+    # Loopback only, like every admin port of ldap/db/arc below: none of them
+    # authenticate through Keycloak, and dcm4chee-arc's REST API/UI on 8443
+    # has no authentication at all. Containers reach these by service name,
+    # admins via an SSH tunnel. Only the DICOM port stays on all interfaces.
     ports:
-      - "389:389"
-    env_file: docker-compose.env
+      - "127.0.0.1:${PORT_DCM4CHEE_LDAP:-389}:389"
+    environment:
+      STORAGE_DIR: "${DCM4CHEE_STORAGE_DIR:-/storage/fs1}"
+      POSTGRES_DB: "${DCM4CHEE_POSTGRES_DB:-pacsdb}"
+      POSTGRES_USER: "${DCM4CHEE_POSTGRES_USER:-pacs}"
+      POSTGRES_PASSWORD: "${DCM4CHEE_POSTGRES_PASSWORD:?Set DCM4CHEE_POSTGRES_PASSWORD in the root .env}"
+      # Only applied when slapd initialises an empty config; an existing
+      # directory keeps its olcRootPW until changed with ldapmodify.
+      LDAP_ROOTPASS: "${DCM4CHEE_LDAP_ROOTPASS:?Set DCM4CHEE_LDAP_ROOTPASS in the root .env}"
+      LDAP_CONFIGPASS: "${DCM4CHEE_LDAP_CONFIGPASS:?Set DCM4CHEE_LDAP_CONFIGPASS in the root .env}"
     volumes:
-      - ~/dcm4chee-arc/ldap:/var/lib/ldap
-      - ~/dcm4chee-arc/slapd.d:/etc/ldap/slapd.d
+      # The image's real data paths (its declared VOLUMEs). These used to be
+      # /var/lib/ldap and /etc/ldap/slapd.d, which the image never reads, so
+      # the archive config silently lived in anonymous volumes instead.
+      # An empty slapd.d here makes slapd initialise a fresh default config.
+      - ./dcm4chee-arc/ldap:/var/lib/openldap/openldap-data
+      - ./dcm4chee-arc/slapd.d:/etc/openldap/slapd.d
+    networks:
+      - interact-dcm4chee
+    restart: unless-stopped
+
   db:
     image: dcm4che/postgres-dcm4chee:14.5-29
     logging:
@@ -18,12 +258,20 @@ services:
       options:
         max-size: "10m"
     ports:
-      - "5432:5432"
-    env_file: docker-compose.env
+      - "127.0.0.1:${PORT_DCM4CHEE_DB:-5432}:5432"
+    environment:
+      STORAGE_DIR: "${DCM4CHEE_STORAGE_DIR:-/storage/fs1}"
+      POSTGRES_DB: "${DCM4CHEE_POSTGRES_DB:-pacsdb}"
+      POSTGRES_USER: "${DCM4CHEE_POSTGRES_USER:-pacs}"
+      POSTGRES_PASSWORD: "${DCM4CHEE_POSTGRES_PASSWORD:?Set DCM4CHEE_POSTGRES_PASSWORD in the root .env}"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ~/dcm4chee-arc/db:/var/lib/postgresql/data
+      - ./dcm4chee-arc/db:/var/lib/postgresql/data
+    networks:
+      - interact-dcm4chee
+    restart: unless-stopped
+
   arc:
     image: dcm4che/dcm4chee-arc-psql:5.29.0
     logging:
@@ -31,16 +279,24 @@ services:
       options:
         max-size: "10m"
     ports:
-      - "8080:8080"
-      - "8443:8443"
-      - "9990:9990"
-      - "9993:9993"
-      - "11112:11112"
-      - "2762:2762"
-      - "2575:2575"
-      - "12575:12575"
-    env_file: docker-compose.env
+      # The browser path to the archive is oauth2-proxy -> ohif_viewer ->
+      # arc:8080; publishing 8443 publicly would skip Keycloak entirely.
+      - "127.0.0.1:${PORT_DCM4CHEE_HTTPS:-8443}:8443"
+      - "127.0.0.1:${PORT_DCM4CHEE_MGMT:-9990}:9990"
+      - "127.0.0.1:${PORT_DCM4CHEE_MGMT_SSL:-9993}:9993"
+      - "${PORT_DCM4CHEE_DICOM:-11112}:11112"
+      - "127.0.0.1:${PORT_DCM4CHEE_DICOM_TLS:-2762}:2762"
+      - "127.0.0.1:${PORT_DCM4CHEE_HL7:-2575}:2575"
+      - "127.0.0.1:${PORT_DCM4CHEE_HL7_TLS:-12575}:12575"
+    expose:
+      - "8080"
     environment:
+      STORAGE_DIR: "${DCM4CHEE_STORAGE_DIR:-/storage/fs1}"
+      POSTGRES_DB: "${DCM4CHEE_POSTGRES_DB:-pacsdb}"
+      POSTGRES_USER: "${DCM4CHEE_POSTGRES_USER:-pacs}"
+      POSTGRES_PASSWORD: "${DCM4CHEE_POSTGRES_PASSWORD:?Set DCM4CHEE_POSTGRES_PASSWORD in the root .env}"
+      # arc binds to ldap as cn=admin with this; must match ldap's olcRootPW.
+      LDAP_ROOTPASS: "${DCM4CHEE_LDAP_ROOTPASS:?Set DCM4CHEE_LDAP_ROOTPASS in the root .env}"
       WILDFLY_CHOWN: /opt/wildfly/standalone /storage
       WILDFLY_WAIT_FOR: ldap:389 db:5432
     depends_on:
@@ -49,25 +305,54 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-      - ~/dcm4chee-arc/wildfly:/opt/wildfly/standalone
-      - ~/dcm4chee-arc/storage:/storage
+      - ./dcm4chee-arc/wildfly:/opt/wildfly/standalone
+      - ./dcm4chee-arc/storage:/storage
+    networks:
+      - interact-dcm4chee
+    restart: unless-stopped
+
   ohif_viewer:
     build:
       # Project root
       context: ./../../../../
       # Relative to context
       dockerfile: ./platform/app/.recipes/Nginx-Dcm4chee/dockerfile
-    image: webapp:latest
-    container_name: ohif_dcm4chee
+    image: ${STACK_NAME:-interact}-webapp:latest
+    container_name: ${STACK_NAME:-interact}-ohif_dcm4chee
+    environment:
+      <<: *proxy-env
+      # Patched into the baked-in app-config.js at container start by
+      # /docker-entrypoint.d/40-interact-ports.sh, so OHIF's fetches reach THIS
+      # stack's portal. Without it OHIF falls back to the default 5005, which
+      # on a host running two stacks is the other deployment's portal.
+      PORT_PORTAL: ${PORT_PORTAL:-5005}
     volumes:
       # Nginx config
       - ./config/nginx.conf:/etc/nginx/nginx.conf
       # Logs
       - ./logs/nginx:/var/logs/nginx
-      # Let's Encrypt
-      # - letsencrypt_certificates:/etc/letsencrypt
-      # - letsencrypt_challenges:/var/www/letsencrypt
-    ports:
-      - '443:443' # SSL
-      - '80:80' # Web
-    restart: on-failure
+    # No published ports: a direct port would bypass oauth2-proxy (Keycloak).
+    # Browsers reach this only through oauth2-proxy on PORT_OHIF.
+    expose:
+      - "80"
+    networks:
+      - interact-dcm4chee
+    restart: unless-stopped
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+#
+# Every service here is on interact-dcm4chee explicitly rather than relying on
+# the Compose default network. Under the old one-project-per-directory layout
+# the default network WAS the shared one (as `nginx-dcm4chee_default`), which is
+# why API/, docker-context-gui/ and the others joined it by that name. Now that
+# everything is one project, naming it outright is what keeps `arc`,
+# `dcm4chee-ui-proxy` and `ohif_viewer` resolvable from the other stacks.
+networks:
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge
+  interact-auth:
+    name: ${STACK_NAME:-interact}-auth
+    driver: bridge

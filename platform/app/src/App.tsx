@@ -27,6 +27,7 @@ import {
   ModalProvider,
   ViewportDialogProvider,
   UserAuthenticationProvider,
+  ActiveThemeProvider,
 } from '@ohif/ui-next';
 // Viewer Project
 // TODO: Should this influence study list?
@@ -111,6 +112,12 @@ function App({
     uiNotificationService,
   } = servicesManager.services;
 
+  const hasThemeModule =
+    Array.isArray(appConfigState.customizationService) &&
+    appConfigState.customizationService.some(
+      ref => typeof ref === 'string' && ref.includes('customizationModule.theme')
+    );
+
   const providers = [
     [AppConfigProvider, { value: appConfigState }],
     [UserAuthenticationProvider, { service: userAuthenticationService }],
@@ -124,6 +131,7 @@ function App({
     [NotificationProvider, { service: uiNotificationService }],
     [TooltipProvider],
     [DialogProvider, { service: uiDialogService, dialog: ManagedDialog }],
+    ...(hasThemeModule ? [[ActiveThemeProvider]] : []),
     [ModalProvider, { service: uiModalService, modal: ModalNext }],
   ];
 

@@ -1,0 +1,19 @@
+{
+  "name": "@ohif/extension-series-webhooks",
+  "version": "1.0.0",
+  "description": "Adds custom entries to the StudyBrowser thumbnail \"...\" menu that notify an external API with the clicked series' identifiers",
+  "author": "Local",
+  "license": "MIT",
+  "main": "dist/ohif-extension-series-webhooks.umd.js",
+  "module": "src/index.ts",
+  "engines": {
+    "node": ">=24"
+  },
+  "peerDependencies": {
+    "@ohif/core": "workspace:*",
+    "react": "18.3.1"
+  },
+  "keywords": [
+    "ohif-extension"
+  ]
+}

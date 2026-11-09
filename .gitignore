@@ -47,7 +47,7 @@ videos/
 platform/app/src/pluginImports.js
 CLAUDE.md
 /Viewers.iml
-platform/app/.recipes/Nginx-Dcm4Chee/logs/*
+platform/app/.recipes/Nginx-Dcm4chee/logs/*
 platform/app/.recipes/OpenResty-Orthanc/logs/*
 .vercel
 
@@ -72,3 +72,6 @@ libs/
 link-cs3d.js
 unlink-cs3d.js
 auth.json
+platform/app/.recipes/Nginx-Dcm4chee/dcm4chee-arc/
+platform/app/.recipes/Nginx-Dcm4chee/backups/
+platform/app/.recipes/Nginx-Dcm4chee/logs/

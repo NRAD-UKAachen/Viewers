@@ -204,3 +204,27 @@
   --chart-4: 280 40% 48%;
   --chart-5: 340 45% 45%;
 }
+
+/* -- Cutsom: Aachen --- */
+.theme-aachen {
+  --background: 0 0% 5%;            /* almost black */
+  --foreground: 0 0% 100%;           /* white */
+  --card: 80 100% 30%;                 /* UKA green */
+  --card-foreground: 0 0% 100%;      /* white */
+  --popover: 0 0% 60%;             /* grey */
+  --popover-foreground: 0 0% 100%;  /* white */
+  --primary: 0 0% 100%;             /* white */
+  --primary-foreground: 210 63% 73%;  /* light blue */
+  --secondary: 80 100% 30%;           /* UKA green */
+  --secondary-foreground: 0 0% 5%;/* almost black */
+  --muted: 0 0% 20%;               /* very dark grey */
+  --muted-foreground: 0 0% 100%;    /* white */
+  --accent: 210 63% 73%;              /* light blue */
+  --accent-foreground: 0 0% 100%;    /* white */
+  --border: 90 100% 40%;               /* dark lime */
+  --input: 80 100% 30%;                /* UKA green */
+  --ring: 208 100% 31%;                /* RWTH blue */
+  --highlight: 80 100% 30%;           /* UKA green */
+  --destructive: 345 100% 40%;         /* UKA red */
+  --destructive-foreground: 0 0% 100%;/* white */
+}

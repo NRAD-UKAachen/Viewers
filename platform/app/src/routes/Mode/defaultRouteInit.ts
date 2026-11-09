@@ -34,7 +34,10 @@ export async function defaultRouteInit(
     const displaySets = displaySetService.getActiveDisplaySets();
     // The display sets are not necessarily in load order, even though the
     // series got started in load order, so re-sort them before hanging
-    const sortCriteria = customizationService.getCustomization('sortingCriteria');
+    const sortCriteria = customizationService.getCustomization('sortingCriteria') as (
+      a,
+      b
+    ) => number;
 
     if (!displaySets || !displaySets.length) {
       return;
